@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<title>해줌 AI</title>
+	<link rel="stylesheet" href="popup.css">
+</head>
+<body>
+	<div class="container">
+		<h1>해줌 AI</h1>
+		<p class="description">
+			생활문서에서 내가 해야 할 일을 찾아드립니다.
+		</p>
+		<button id="analyzeButton">
+			📄 현재 문서 분석하기
+		</button>
+		<button id="analyzeUploadedDocumentButton">PDF·이미지 문서 분석하기</button>
+		<button id="googleLoginButton">Google Calendar 연결하기</button>
+<p id="googleStatus">아직 Google 계정이 연결되지 않았습니다.</p>
+<button id="addCalendarButton">
+    📅 미완료 할 일 캘린더에 등록하기
+</button>
+
+<p id="calendarStatus">아직 등록된 일정이 없습니다.</p>
+<div class="manual-add">
+  <input
+    type="text"
+    id="newTaskInput"
+    placeholder="새로운 할 일을 입력하세요"
+  >
+
+  <input
+    type="date"
+    id="newTaskDeadline"
+  >
+
+  <button id="addTaskButton">+ 할 일 추가</button>
+</div>
+
+		<div class="result">
+			<h2>AI 분석 결과</h2>
+			<div id="resultText">
+  			아직 분석된 내용이 없습니다.
+		</div>
+		</div>
+	</div>
+	<script src="popup.js"></script>
+</body>
+</html>

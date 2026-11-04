@@ -1,0 +1,15 @@
+{
+  "name": "haezoom-document-insights",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "pdfjs-dist": "6.5.438",
+    "tesseract.js": "5.1.1"
+  }
+}

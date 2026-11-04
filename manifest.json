@@ -1,0 +1,38 @@
+{
+  "manifest_version": 3,
+  "name": "해줌 AI",
+  "version": "1.0.0",
+  "description": "생활문서에서 해야 할 일을 찾아주는 AI 확장 프로그램",
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self';"
+  },
+  "icons": {
+    "128": "icon.png"
+  },
+  "permissions": [
+  "activeTab",
+  "scripting",
+  "storage",
+  "identity",
+  "alarms",
+  "notifications"
+],
+  "host_permissions": [
+    "https://www.googleapis.com/*",
+    "https://tessdata.projectnaptha.com/*",
+    "http://127.0.0.1:8000/*"
+  ],
+  "oauth2": {
+    "client_id": "76753412676-5fms19nvnpgpm6eseotha43g9gqioojl.apps.googleusercontent.com",
+    "scopes": [
+      "https://www.googleapis.com/auth/calendar.events"
+    ]
+  },
+  "background": {
+  "service_worker": "background.js"
+},
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": "icon.png"
+  }
+}
