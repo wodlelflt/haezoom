@@ -8,6 +8,7 @@ const elements = Object.fromEntries([
   "error-state", "error-message", "results", "schedule-list", "task-list", "ocr-text", "ocr-character-count",
   "download-json", "settings-toggle", "settings-panel", "settings-close", "settings-refresh", "settings-status", "server-model", "key-indicator", "toast",
   "api-provider", "api-key-input", "api-key-save", "api-key-status", "api-key-toggle",
+  "calendar-actions", "add-calendar-events", "calendar-import-status",
 ].map((id) => [id, document.getElementById(id)]));
 
 let selectedFile = null;
@@ -29,6 +30,7 @@ elements["settings-close"].addEventListener("click", closeSettingsPanel);
 elements["settings-refresh"].addEventListener("click", refreshServerStatus);
 elements["download-json"].addEventListener("click", downloadResult);
 if (IS_EXTENSION_PAGE) {
+  elements["add-calendar-events"].addEventListener("click", addResultsToGoogleCalendar);
   elements["api-provider"].addEventListener("change", selectExtensionProvider);
   elements["api-key-save"].addEventListener("click", saveExtensionAPIKey);
   elements["api-key-toggle"].addEventListener("click", toggleAPIKeyVisibility);
@@ -470,8 +472,182 @@ function renderResult(result) {
     taskCards.push(empty);
   }
   elements["task-list"].replaceChildren(...taskCards);
+  if (IS_EXTENSION_PAGE) {
+    const calendarEntries = collectCalendarEntries(result);
+    const eligibleCount = calendarEntries.filter((entry) => entry.event).length;
+    const skippedCount = calendarEntries.length - eligibleCount;
+    elements["calendar-actions"].hidden = false;
+    elements["add-calendar-events"].disabled = eligibleCount === 0;
+    elements["calendar-import-status"].textContent = eligibleCount
+      ? `${eligibleCount}개 등록 가능${skippedCount ? ` · ${skippedCount}개는 날짜 확인 또는 검토가 필요해 제외` : ""}`
+      : "날짜가 확정된 항목이 없거나 확인이 필요한 항목뿐입니다.";
+  }
   elements["ocr-text"].textContent = result.ocrText;
   elements["ocr-character-count"].textContent = `${result.ocrText.length.toLocaleString("ko-KR")}자`;
+}
+
+function collectCalendarEntries(result) {
+  const schedules = result.schedules.map((schedule) => ({
+    kind: "schedule",
+    item: schedule,
+    event: makeCalendarEvent("schedule", schedule),
+  }));
+  const tasks = result.tasks.map((task) => ({
+    kind: "task",
+    item: task,
+    event: makeCalendarEvent("task", task),
+  }));
+  return [...schedules, ...tasks];
+}
+
+function makeCalendarEvent(kind, item) {
+  if (item.needs_review) return null;
+  const date = parseCalendarDate(kind === "schedule" ? item.date : item.deadline);
+  if (!date) return null;
+
+  const source = selectedFile?.name ? `출처 문서: ${selectedFile.name}` : "";
+  const details = kind === "schedule"
+    ? [item.details, item.evidence ? `근거: ${item.evidence}` : "", source]
+    : [
+        item.action ? `할 일: ${item.action}` : "",
+        item.materials?.length ? `준비물: ${item.materials.join(", ")}` : "",
+        item.cost !== null && item.cost !== undefined ? `비용: ${item.cost.toLocaleString("ko-KR")}원` : "",
+        item.submission ? `제출처: ${item.submission}` : "",
+        item.evidence ? `근거: ${item.evidence}` : "",
+        source,
+      ];
+  const event = {
+    summary: item.title,
+    description: [...details.filter(Boolean), "해줌 AI에서 등록"].join("\n\n"),
+  };
+
+  if (kind === "schedule" && item.location) event.location = item.location;
+  const time = kind === "schedule" ? parseCalendarTime(item.time) : null;
+  if (time) {
+    const startDateTime = `${date}T${time}:00+09:00`;
+    event.start = { dateTime: startDateTime, timeZone: "Asia/Seoul" };
+    event.end = {
+      dateTime: new Date(Date.parse(startDateTime) + 60 * 60 * 1000).toISOString(),
+      timeZone: "Asia/Seoul",
+    };
+  } else {
+    event.start = { date };
+    event.end = { date: addCalendarDays(date, 1) };
+  }
+  return event;
+}
+
+function parseCalendarDate(value) {
+  if (typeof value !== "string") return null;
+  const normalized = value.replace(/\([^)]*\)/g, "").trim();
+  const match = normalized.match(/^([0-9]{4})\s*(?:년|[./-])\s*([0-9]{1,2})\s*(?:월|[./-])\s*([0-9]{1,2})\s*일?$/);
+  if (!match) return null;
+  const [, yearText, monthText, dayText] = match;
+  const year = Number(yearText);
+  const month = Number(monthText);
+  const day = Number(dayText);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) {
+    return null;
+  }
+  return `${yearText}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+function parseCalendarTime(value) {
+  if (typeof value !== "string") return null;
+  const match = value.trim().match(/^(오전|오후)?\s*([0-9]{1,2})(?::([0-9]{2})|시(?:\s*([0-9]{1,2})분?)?)?$/);
+  if (!match) return null;
+  const [, meridiem, hourText, minuteText, koreanMinuteText] = match;
+  let hour = Number(hourText);
+  const minute = Number(minuteText || koreanMinuteText || 0);
+  if (minute > 59) return null;
+  if (meridiem) {
+    if (hour < 1 || hour > 12) return null;
+    hour = (hour % 12) + (meridiem === "오후" ? 12 : 0);
+  } else if (!minuteText || hour > 23) {
+    return null;
+  }
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+}
+
+function addCalendarDays(date, days) {
+  const [year, month, day] = date.split("-").map(Number);
+  const nextDate = new Date(Date.UTC(year, month - 1, day + days));
+  return `${nextDate.getUTCFullYear()}-${String(nextDate.getUTCMonth() + 1).padStart(2, "0")}-${String(nextDate.getUTCDate()).padStart(2, "0")}`;
+}
+
+function getCalendarAccessToken() {
+  return new Promise((resolve, reject) => {
+    chrome.identity.getAuthToken({ interactive: true }, (token) => {
+      const error = chrome.runtime.lastError;
+      if (error) {
+        reject(new Error(error.message));
+      } else if (!token) {
+        reject(new Error("Google Calendar 인증 토큰을 받지 못했습니다."));
+      } else {
+        resolve(token);
+      }
+    });
+  });
+}
+
+async function getCalendarEntryKey(event) {
+  const data = new TextEncoder().encode(JSON.stringify(event));
+  const digest = await crypto.subtle.digest("SHA-256", data);
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+async function addResultsToGoogleCalendar() {
+  const entries = collectCalendarEntries(extractedResult || { schedules: [], tasks: [] });
+  const candidates = entries.filter((entry) => entry.event);
+  const skippedCount = entries.length - candidates.length;
+  const button = elements["add-calendar-events"];
+  button.disabled = true;
+  elements["calendar-import-status"].textContent = "Google 계정 연결을 확인하는 중...";
+
+  try {
+    const token = await getCalendarAccessToken();
+    const stored = await chrome.storage.local.get("haezoomCalendarEventIds");
+    const eventIds = stored.haezoomCalendarEventIds || {};
+    let createdCount = 0;
+    let duplicateCount = 0;
+    let failedCount = 0;
+
+    for (const candidate of candidates) {
+      try {
+        const key = await getCalendarEntryKey(candidate.event);
+        if (eventIds[key]) {
+          duplicateCount += 1;
+          continue;
+        }
+        const response = await fetch("https://www.googleapis.com/calendar/v3/calendars/primary/events", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(candidate.event),
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(payload.error?.message || response.statusText);
+        eventIds[key] = payload.id;
+        await chrome.storage.local.set({ haezoomCalendarEventIds: eventIds });
+        createdCount += 1;
+      } catch (error) {
+        console.error("Google Calendar 일정 등록 실패:", error);
+        failedCount += 1;
+      }
+    }
+
+    const summary = [`등록 ${createdCount}개`, `이미 등록 ${duplicateCount}개`];
+    if (skippedCount) summary.push(`확인 필요로 제외 ${skippedCount}개`);
+    if (failedCount) summary.push(`실패 ${failedCount}개`);
+    elements["calendar-import-status"].textContent = summary.join(" · ");
+  } catch (error) {
+    elements["calendar-import-status"].textContent = `Google Calendar 연결 실패: ${error.message}`;
+  } finally {
+    button.disabled = candidates.length === 0;
+  }
 }
 
 function downloadResult() {

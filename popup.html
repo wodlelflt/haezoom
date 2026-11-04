@@ -10,10 +10,10 @@
 	<div class="container">
 		<h1>해줌 AI</h1>
 		<p class="description">
-			생활문서에서 내가 해야 할 일을 찾아드립니다.
+			학교 공지에서 내용을 드래그해 선택한 뒤 AI 분석을 눌러주세요.
 		</p>
 		<button id="analyzeButton">
-			📄 현재 문서 분석하기
+			✳ 선택한 내용 AI 분석
 		</button>
 		<button id="analyzeUploadedDocumentButton">PDF·이미지 문서 분석하기</button>
 		<button id="googleLoginButton">Google Calendar 연결하기</button>
@@ -40,6 +40,12 @@
 
 		<div class="result">
 			<h2>AI 분석 결과</h2>
+			<section id="pageAnalysisResult" hidden>
+				<h3>공지 요약</h3>
+				<p id="pageSummary"></p>
+				<button id="addPageAnalysisToCalendarButton" type="button">분석 결과를 Google Calendar에 등록</button>
+				<p id="pageCalendarStatus" role="status" aria-live="polite"></p>
+			</section>
 			<div id="resultText">
   			아직 분석된 내용이 없습니다.
 		</div>

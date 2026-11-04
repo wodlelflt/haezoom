@@ -103,6 +103,10 @@
               <div class="results" id="results" hidden>
                 <div class="key-info-block"><div class="result-block-heading"><span class="eyebrow">SCHEDULES</span><button class="text-button" id="download-json" type="button">JSON 다운로드 <span aria-hidden="true">↗</span></button></div><div class="schedule-list" id="schedule-list"></div></div>
                 <div class="key-info-block"><div class="result-block-heading"><span class="eyebrow">TASKS</span></div><div class="task-list" id="task-list"></div></div>
+                <div class="calendar-actions" id="calendar-actions" hidden>
+                  <button class="button button-dark" id="add-calendar-events" type="button">Google Calendar에 등록</button>
+                  <span id="calendar-import-status" role="status" aria-live="polite"></span>
+                </div>
                 <details class="ocr-details"><summary>OCR 원문 보기 <span id="ocr-character-count"></span></summary><pre id="ocr-text"></pre></details>
               </div>
             </div>

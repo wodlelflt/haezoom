@@ -9,6 +9,11 @@ const newTaskDeadline = document.getElementById("newTaskDeadline");
 
 const addCalendarButton = document.getElementById("addCalendarButton");
 const calendarStatus = document.getElementById("calendarStatus");
+const pageAnalysisResult = document.getElementById("pageAnalysisResult");
+const pageSummary = document.getElementById("pageSummary");
+const addPageAnalysisToCalendarButton = document.getElementById("addPageAnalysisToCalendarButton");
+const pageCalendarStatus = document.getElementById("pageCalendarStatus");
+let latestPageAnalysis = null;
 
 analyzeUploadedDocumentButton.addEventListener("click", () => {
   chrome.tabs.create({ url: chrome.runtime.getURL("document.html") });
@@ -158,84 +163,7 @@ addTaskButton.addEventListener("click", () => {
   newTaskDeadline.value = "";
 });
 
-
- // 1. 웹페이지에서 실제 해야 할 일 후보 찾기
-
-function extractTasks(pageText) {
-  const lines = pageText
-    .replace(/\r/g, "\n")
-    .split(/\n+/)
-    .map(line => line.replace(/\s+/g, " ").trim())
-    .filter(line => line.length >= 5);
-
-  const actionPattern =
-    /제출|신청|접수|납부|준비물|가져오|지참|참석|참가|참여|등록|예약|신청서|제출서류|회신|응답|동의서|마감|제출해야|신청해야|까지 제출|까지 신청|참석 바랍니다|제출할 것|신청할 것|작성하여|제출해 주|신청해 주|참여해 주|신청 기간|제출 기한|신청 방법|제출 방법|기간 내|기한 내/;
-
-  const noisePattern =
-    /해당 기간에 .*없습니다|학사일정|홈으로|로그인|회원가입|사이트맵|메뉴|검색|개인정보처리방침|이용약관/;
-
-  const tasks = [];
-
-  for (const line of lines) {
-    if (noisePattern.test(line)) continue;
-    if (!actionPattern.test(line)) continue;
-
-    // 날짜 찾기
-    let dateMatch = line.match(
-      /(20\d{2})\s*년\s*(\d{1,2})\s*월\s*(\d{1,2})\s*일?/
-    );
-
-    // 연도가 없는 날짜 찾기
-    if (!dateMatch) {
-      const shortMatch = line.match(
-        /(\d{1,2})\s*월\s*(\d{1,2})\s*일/
-      );
-
-      if (shortMatch) {
-        dateMatch = [
-          shortMatch[0],
-          new Date().getFullYear(),
-          shortMatch[1],
-          shortMatch[2]
-        ];
-      }
-    }
-
-    let deadline = null;
-
-    if (dateMatch) {
-      const year = Number(dateMatch[1]);
-      const month = Number(dateMatch[2]);
-      const day = Number(dateMatch[3]);
-
-      const date = new Date(year, month - 1, day);
-
-      // 실제 존재하는 날짜인지 확인
-      if (
-        date.getFullYear() === year &&
-        date.getMonth() === month - 1 &&
-        date.getDate() === day
-      ) {
-        deadline =
-          `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-      }
-    }
-
-    if (!tasks.some(task => task.text === line)) {
-      tasks.push({
-        text: line,
-        deadline: deadline
-      });
-    }
-  }
-
-  return tasks.slice(0, 20);
-}
-
-
-// 2. 체크리스트 화면 만들기
-
-// 2. AI 분석 결과를 기존 목록에 추가하기
+// AI 분석 결과에서 할 일을 기존 체크리스트에 추가하기
 function showChecklist(tasks) {
   // 기존 분석 중 메시지 제거
   const messages = resultText.querySelectorAll("p");
@@ -350,73 +278,70 @@ label.dataset.deadline = task.deadline || "";
 
 // 3. 분석 버튼을 눌렀을 때 실행
 analyzeButton.addEventListener("click", async () => {
-  const loadingMessage = document.createElement("p");
-loadingMessage.textContent = "웹페이지에서 할 일을 찾고 있어요...";
-resultText.appendChild(loadingMessage);
+  analyzeButton.disabled = true;
+  latestPageAnalysis = null;
+  pageAnalysisResult.hidden = true;
+  resultText.textContent = "선택한 공지 내용을 AI가 분석하고 있어요...";
   try {
     const [tab] = await chrome.tabs.query({
-  active: true,
-  lastFocusedWindow: true
-});
+      active: true,
+      lastFocusedWindow: true
+    });
+    if (!tab?.id || !tab.url || /^(chrome|edge|about|devtools):/i.test(tab.url)) {
+      throw new Error("학교 공지 페이지를 열고 분석할 문장을 드래그해 선택해 주세요.");
+    }
 
-    
-if (!tab || !tab.id) {
-  resultText.textContent = "현재 탭을 찾을 수 없어요.";
-  return;
-}
+    const pageResults = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: () => ({
+        text: window.getSelection()?.toString().trim() || "",
+        title: document.title,
+        url: location.href,
+      }),
+    });
+    const page = pageResults?.[0]?.result;
+    if (!page?.text) {
+      throw new Error("분석할 공지 내용을 먼저 드래그해 선택해 주세요.");
+    }
 
-if (
-  !tab.url ||
-  /^(chrome|edge|about|devtools):/i.test(tab.url)
-) {
-  resultText.textContent =
-    "크롬 설정 화면은 분석할 수 없어요. 네이버나 학교 공지사항을 열어 주세요.";
-  return;
-}
+    const saved = await chrome.storage.local.get("haezoomAISettings");
+    const settings = saved.haezoomAISettings || {};
+    const provider = settings.provider || "openai";
+    const apiKey = settings.keys?.[provider] || "";
+    if (!apiKey) {
+      throw new Error("확장 프로그램의 문서 분석 화면에서 AI 제공자와 API 키를 먼저 설정해 주세요.");
+    }
 
+    const response = await fetch("http://127.0.0.1:8000/api/analyze", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: page.text.slice(0, 45000), provider, apiKey }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.error?.message || `AI 분석 실패 (${response.status})`);
 
-const statusMessage = document.createElement("p");
-statusMessage.textContent =
-  "분석 대상 주소: " + tab.url +
-  "\n페이지 읽기를 시도하는 중...";
-
-resultText.appendChild(statusMessage);
-let results;
-
-try {
-  results = await chrome.scripting.executeScript({
-    target: { tabId: tab.id },
-    func: () => document.body.innerText
-  });
-} catch (error) {
-  resultText.textContent =
-    "분석 대상 주소:\n" + tab.url +
-    "\n\n오류 종류: " + error.name +
-    "\n오류 내용: " + error.message;
-  return;
-}
-
-
-    const pageText = results?.[0]?.result?.trim();
-
-    if (!pageText) {
-  const errorMessage = document.createElement("p");
-  errorMessage.textContent =
-    "읽을 수 있는 글이 없습니다. 일반 웹페이지에서 시도해 주세요.";
-  resultText.appendChild(errorMessage);
-  return;
-}
-
-    const tasks = extractTasks(pageText);
-    showChecklist(tasks);
-
+    latestPageAnalysis = { ...payload.result, sourceTitle: page.title, sourceUrl: page.url };
+    pageSummary.textContent = latestPageAnalysis.summary || "요약을 생성하지 못했습니다.";
+    pageAnalysisResult.hidden = false;
+    await loadTasks();
+    showChecklist(latestPageAnalysis.tasks.map((task) => ({
+      text: `${task.title}${task.action ? `: ${task.action}` : ""}`,
+      deadline: task.deadline,
+    })));
+    const eligibleCount = getPageCalendarEntries(latestPageAnalysis).length;
+    const skippedCount = latestPageAnalysis.schedules.length + latestPageAnalysis.tasks.length - eligibleCount;
+    addPageAnalysisToCalendarButton.disabled = eligibleCount === 0;
+    pageCalendarStatus.textContent = eligibleCount
+      ? `${eligibleCount}개 등록 가능${skippedCount ? ` · ${skippedCount}개는 날짜 확인 또는 검토가 필요해 제외` : ""}`
+      : "날짜가 확정된 일정이나 마감 업무가 없습니다.";
   } catch (error) {
-  console.error("해줌 AI 오류:", error);
-
-  resultText.textContent =
-    "오류 종류: " + error.name +
-    "\n오류 내용: " + error.message;
-}
+    console.error("선택 공지 AI 분석 실패:", error);
+    resultText.textContent = error.message.includes("Failed to fetch")
+      ? "로컬 AI 서버에 연결할 수 없습니다. 터미널에서 npm start를 실행했는지 확인해 주세요."
+      : error.message;
+  } finally {
+    analyzeButton.disabled = false;
+  }
 });
 // 저장된 할 일 목록 불러오기
 async function loadTasks() {
@@ -518,6 +443,157 @@ if (task.completed) {
 loadTasks().catch(error => {
     console.error("할 일 불러오기 실패:", error);
 });
+
+addPageAnalysisToCalendarButton.addEventListener("click", addPageAnalysisToCalendar);
+
+function parsePageDateRange(value) {
+  if (typeof value !== "string") return null;
+  const isRange = /부터|까지|~|～|–|—/.test(value);
+  const datePattern = /20\d{2}\s*(?:년|[./-])\s*\d{1,2}\s*(?:월|[./-])\s*\d{1,2}\s*일?/g;
+  const tokens = [...value.matchAll(datePattern)].map(([token]) => token);
+  if (!tokens.length || (isRange && tokens.length < 2) || (!isRange && tokens.length !== 1)) return null;
+
+  const parseDate = (token) => {
+    const match = token.match(/^(20\d{2})\s*(?:년|[./-])\s*(\d{1,2})\s*(?:월|[./-])\s*(\d{1,2})\s*일?$/);
+    if (!match) return null;
+    const [, yearText, monthText, dayText] = match;
+    const year = Number(yearText);
+    const month = Number(monthText);
+    const day = Number(dayText);
+    const date = new Date(Date.UTC(year, month - 1, day));
+    if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return null;
+    return `${yearText}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+  };
+
+  const start = parseDate(tokens[0]);
+  const lastDate = parseDate(tokens.at(-1));
+  if (!start || !lastDate) return null;
+  const end = getNextCalendarDate(lastDate);
+  if (start >= end) return null;
+  return { start, end, isRange };
+}
+
+function getNextCalendarDate(value) {
+  const [year, month, day] = value.split("-").map(Number);
+  const next = new Date(Date.UTC(year, month - 1, day + 1));
+  return `${next.getUTCFullYear()}-${String(next.getUTCMonth() + 1).padStart(2, "0")}-${String(next.getUTCDate()).padStart(2, "0")}`;
+}
+
+function parsePageTime(value) {
+  if (typeof value !== "string") return null;
+  const match = value.trim().match(/^(오전|오후)?\s*([0-9]{1,2})(?::([0-9]{2})|시(?:\s*([0-9]{1,2})분?)?)?$/);
+  if (!match) return null;
+  const [, meridiem, hourText, minuteText, koreanMinuteText] = match;
+  let hour = Number(hourText);
+  const minute = Number(minuteText || koreanMinuteText || 0);
+  if (minute > 59) return null;
+  if (meridiem) {
+    if (hour < 1 || hour > 12) return null;
+    hour = (hour % 12) + (meridiem === "오후" ? 12 : 0);
+  } else if (!minuteText || hour > 23) {
+    return null;
+  }
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+}
+
+function getPageCalendarEntries(analysis) {
+  const events = [
+    ...analysis.schedules.map((schedule) => ({ kind: "schedule", item: schedule })),
+    ...analysis.tasks.map((task) => ({ kind: "task", item: task })),
+  ];
+  return events.map(({ kind, item }) => {
+    if (item.needs_review) return null;
+    const range = parsePageDateRange(kind === "schedule" ? item.date : item.deadline);
+    if (!range) return null;
+    const description = kind === "schedule"
+      ? [item.details, item.evidence ? `근거: ${item.evidence}` : ""]
+      : [
+          item.action ? `할 일: ${item.action}` : "",
+          item.materials?.length ? `준비물: ${item.materials.join(", ")}` : "",
+          item.cost !== null && item.cost !== undefined ? `비용: ${item.cost.toLocaleString("ko-KR")}원` : "",
+          item.submission ? `제출처: ${item.submission}` : "",
+          item.evidence ? `근거: ${item.evidence}` : "",
+        ];
+    const event = {
+      summary: item.title,
+      description: [...description.filter(Boolean), `출처: ${latestPageAnalysis.sourceTitle}`, latestPageAnalysis.sourceUrl].join("\n\n"),
+    };
+    if (kind === "schedule" && item.location) event.location = item.location;
+    const time = kind === "schedule" && !range.isRange ? parsePageTime(item.time) : null;
+    if (time) {
+      const startDateTime = `${range.start}T${time}:00+09:00`;
+      event.start = { dateTime: startDateTime, timeZone: "Asia/Seoul" };
+      event.end = {
+        dateTime: new Date(Date.parse(startDateTime) + 60 * 60 * 1000).toISOString(),
+        timeZone: "Asia/Seoul",
+      };
+    } else {
+      event.start = { date: range.start };
+      event.end = { date: range.end };
+    }
+    return event;
+  }).filter(Boolean);
+}
+
+function getGoogleCalendarToken() {
+  return new Promise((resolve, reject) => {
+    chrome.identity.getAuthToken({ interactive: true }, (token) => {
+      const error = chrome.runtime.lastError;
+      if (error) reject(new Error(error.message));
+      else if (!token) reject(new Error("Google Calendar 인증 토큰을 받지 못했습니다."));
+      else resolve(token);
+    });
+  });
+}
+
+async function getCalendarEventKey(event) {
+  const bytes = new TextEncoder().encode(JSON.stringify(event));
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+async function addPageAnalysisToCalendar() {
+  if (!latestPageAnalysis) return;
+  const events = getPageCalendarEntries(latestPageAnalysis);
+  addPageAnalysisToCalendarButton.disabled = true;
+  pageCalendarStatus.textContent = "Google 계정 인증 중...";
+  try {
+    const token = await getGoogleCalendarToken();
+    const stored = await chrome.storage.local.get("haezoomCalendarEventIds");
+    const eventIds = stored.haezoomCalendarEventIds || {};
+    let created = 0;
+    let duplicates = 0;
+    let failed = 0;
+    for (const event of events) {
+      try {
+        const key = await getCalendarEventKey(event);
+        if (eventIds[key]) {
+          duplicates += 1;
+          continue;
+        }
+        const response = await fetch("https://www.googleapis.com/calendar/v3/calendars/primary/events", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+          body: JSON.stringify(event),
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(payload.error?.message || response.statusText);
+        eventIds[key] = payload.id;
+        await chrome.storage.local.set({ haezoomCalendarEventIds: eventIds });
+        created += 1;
+      } catch (error) {
+        console.error("페이지 분석 결과 캘린더 등록 실패:", error);
+        failed += 1;
+      }
+    }
+    pageCalendarStatus.textContent = `등록 ${created}개 · 이미 등록 ${duplicates}개${failed ? ` · 실패 ${failed}개` : ""}`;
+  } catch (error) {
+    pageCalendarStatus.textContent = `Google Calendar 연결 실패: ${error.message}`;
+  } finally {
+    addPageAnalysisToCalendarButton.disabled = events.length === 0;
+  }
+}
+
 const googleLoginButton = document.getElementById("googleLoginButton");
 const googleStatus = document.getElementById("googleStatus");
 

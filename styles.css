@@ -80,3 +80,5 @@ button { color: inherit; }
 .api-key-entry input { width: 100%; min-width: 0; padding: 0 11px; border: 0; outline: 0; background: transparent; font-family: var(--mono); font-size: 11px; }
 .api-key-toggle { padding: 0 11px; border: 0; background: transparent; color: var(--green); font-size: 10px; cursor: pointer; }
 .api-key-actions { margin-top: 9px; }
+.calendar-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 18px 0; border-bottom: 1px solid #e8ede7; }
+.calendar-actions > span { color: #758078; font-size: 11px; line-height: 1.5; }
