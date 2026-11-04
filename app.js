@@ -7,11 +7,13 @@ const elements = Object.fromEntries([
   "empty-state", "progress-state", "progress-step", "progress-message", "progress-percent", "progress-fill", "progress-detail",
   "error-state", "error-message", "results", "schedule-list", "task-list", "ocr-text", "ocr-character-count",
   "download-json", "settings-toggle", "settings-panel", "settings-close", "settings-refresh", "settings-status", "server-model", "key-indicator", "toast",
+  "api-provider", "api-key-input", "api-key-save", "api-key-status", "api-key-toggle",
 ].map((id) => [id, document.getElementById(id)]));
 
 let selectedFile = null;
 let extractedResult = null;
 let toastTimer;
+let extensionAISettings = { provider: "openai", keys: {} };
 
 if (window.pdfjsLib) {
   window.pdfjsLib.GlobalWorkerOptions.workerSrc = IS_EXTENSION_PAGE
@@ -26,7 +28,14 @@ elements["settings-toggle"].addEventListener("click", toggleSettings);
 elements["settings-close"].addEventListener("click", closeSettingsPanel);
 elements["settings-refresh"].addEventListener("click", refreshServerStatus);
 elements["download-json"].addEventListener("click", downloadResult);
-refreshServerStatus();
+if (IS_EXTENSION_PAGE) {
+  elements["api-provider"].addEventListener("change", selectExtensionProvider);
+  elements["api-key-save"].addEventListener("click", saveExtensionAPIKey);
+  elements["api-key-toggle"].addEventListener("click", toggleAPIKeyVisibility);
+  initializeExtensionAISettings().then(refreshServerStatus);
+} else {
+  refreshServerStatus();
+}
 
 for (const eventName of ["dragenter", "dragover"]) {
   elements["drop-zone"].addEventListener(eventName, (event) => {
@@ -88,22 +97,79 @@ function closeSettingsPanel() {
   elements["settings-toggle"].setAttribute("aria-expanded", "false");
 }
 
+async function initializeExtensionAISettings() {
+  const saved = await chrome.storage.local.get("haezoomAISettings");
+  const settings = saved.haezoomAISettings || {};
+  const supportedProviders = ["openai", "gemini", "claude"];
+  extensionAISettings = {
+    provider: supportedProviders.includes(settings.provider) ? settings.provider : "openai",
+    keys: settings.keys && typeof settings.keys === "object" ? settings.keys : {},
+  };
+  elements["api-provider"].value = extensionAISettings.provider;
+  elements["api-key-input"].value = extensionAISettings.keys[extensionAISettings.provider] || "";
+  updateExtensionAPIKeyStatus();
+}
+
+function selectExtensionProvider() {
+  extensionAISettings.provider = elements["api-provider"].value;
+  elements["api-key-input"].value = extensionAISettings.keys[extensionAISettings.provider] || "";
+  updateExtensionAPIKeyStatus();
+  refreshServerStatus();
+}
+
+async function saveExtensionAPIKey() {
+  const providerName = extensionAISettings.provider;
+  const value = elements["api-key-input"].value.trim();
+  if (value) {
+    extensionAISettings.keys[providerName] = value;
+  } else {
+    delete extensionAISettings.keys[providerName];
+  }
+  await chrome.storage.local.set({ haezoomAISettings: extensionAISettings });
+  updateExtensionAPIKeyStatus();
+  await refreshServerStatus();
+}
+
+function toggleAPIKeyVisibility() {
+  const input = elements["api-key-input"];
+  const showKey = input.type === "password";
+  input.type = showKey ? "text" : "password";
+  elements["api-key-toggle"].textContent = showKey ? "숨김" : "표시";
+  elements["api-key-toggle"].setAttribute("aria-label", showKey ? "API 키 숨기기" : "API 키 표시");
+}
+
+function updateExtensionAPIKeyStatus() {
+  const hasKey = Boolean(extensionAISettings.keys[extensionAISettings.provider]);
+  elements["api-key-status"].textContent = hasKey
+    ? "이 브라우저에 API 키가 저장되어 있습니다."
+    : "API 키를 입력하고 저장하세요.";
+  elements["api-key-status"].style.color = hasKey ? "" : "#b35a37";
+}
+
 async function refreshServerStatus() {
   elements["settings-status"].textContent = "로컬 서버 연결을 확인하는 중";
   elements["settings-status"].style.color = "";
   try {
-    const response = await fetch(`${API_BASE_URL}/api/status`);
+    const providerQuery = IS_EXTENSION_PAGE
+      ? `?provider=${encodeURIComponent(extensionAISettings.provider)}`
+      : "";
+    const response = await fetch(`${API_BASE_URL}/api/status${providerQuery}`);
     if (!response.ok) throw new Error("로컬 서버에 연결할 수 없습니다.");
     const status = await response.json();
     elements["server-model"].textContent = status.model;
-    elements["key-indicator"].classList.toggle("ready", status.configured);
-    elements["key-indicator"].setAttribute("aria-label", status.configured ? "API 키 설정됨" : "API 키 미설정");
+    const configured = IS_EXTENSION_PAGE
+      ? Boolean(extensionAISettings.keys[extensionAISettings.provider])
+      : status.configured;
+    elements["key-indicator"].classList.toggle("ready", configured);
+    elements["key-indicator"].setAttribute("aria-label", configured ? "API 키 설정됨" : "API 키 미설정");
     const providerName = status.provider === "gemini" ? "Gemini" : status.provider === "claude" ? "Claude" : "OpenAI";
-    elements["settings-status"].textContent = status.configured
+    elements["settings-status"].textContent = configured
       ? `${providerName} API 키가 설정되어 있습니다.`
-      : `.env에 ${providerName} API 키를 입력한 뒤 서버를 다시 시작하세요.`;
-    if (!status.configured) elements["settings-status"].style.color = "#b35a37";
-    return status;
+      : IS_EXTENSION_PAGE
+        ? "API 설정에서 키를 저장하면 분석할 수 있습니다."
+        : `.env에 ${providerName} API 키를 입력한 뒤 서버를 다시 시작하세요.`;
+    if (!configured) elements["settings-status"].style.color = "#b35a37";
+    return { ...status, configured };
   } catch {
     elements["server-model"].textContent = "연결 안 됨";
     elements["key-indicator"].classList.remove("ready");
@@ -295,10 +361,15 @@ function formatLayoutRows(items, pageNumber, pageWidth) {
 }
 
 async function analyzeText(text, layoutText) {
+  const body = { text, layoutText };
+  if (IS_EXTENSION_PAGE) {
+    body.provider = extensionAISettings.provider;
+    body.apiKey = extensionAISettings.keys[extensionAISettings.provider] || "";
+  }
   const response = await fetch(`${API_BASE_URL}/api/analyze`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text, layoutText }),
+    body: JSON.stringify(body),
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(payload.error?.message || `AI 요청 실패 (${response.status})`);

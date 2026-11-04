@@ -91,19 +91,5 @@ chrome.storage.onChanged.addListener((changes, area) => {
 });
 
 // 확장 프로그램이 시작되면 알림 설정
+chrome.alarms.clear("test-reminder");
 scheduleTaskReminders();
-// 테스트용 알림: 약 2분 뒤 실행
-chrome.alarms.create("test-reminder", {
-  delayInMinutes: 2
-});
-
-chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name === "test-reminder") {
-    chrome.notifications.create({
-      type: "basic",
-      iconUrl: "icon.png",
-      title: "해줌 AI 테스트",
-      message: "알림 기능이 정상적으로 작동합니다!"
-    });
-  }
-});
