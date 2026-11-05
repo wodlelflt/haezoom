@@ -23,7 +23,7 @@
     "https://*.workers.dev/*"
   ],
   "oauth2": {
-    "client_id": "76753412676-5fms19nvnpgpm6eseotha43g9gqioojl.apps.googleusercontent.com",
+    "client_id": "343948030942-cl1ljn6c2e5rf9fb37s2achsr0hktgg9.apps.googleusercontent.com",
     "scopes": [
       "https://www.googleapis.com/auth/calendar.events"
     ]
