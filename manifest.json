@@ -20,7 +20,7 @@
   "host_permissions": [
     "https://www.googleapis.com/*",
     "https://tessdata.projectnaptha.com/*",
-    "http://127.0.0.1:8000/*"
+    "https://*.workers.dev/*"
   ],
   "oauth2": {
     "client_id": "76753412676-5fms19nvnpgpm6eseotha43g9gqioojl.apps.googleusercontent.com",

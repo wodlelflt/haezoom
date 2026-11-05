@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#f4f6f2" />
     <title>문서 인사이트 | Haezoom</title>
+    <script src="api-config.js"></script>
     <link rel="stylesheet" href="styles.css" />
     <script defer src="vendor/tesseract/tesseract.min.js"></script>
     <script type="module" src="extension-entry.js"></script>
@@ -42,24 +43,7 @@
 
         <section class="settings-panel" id="settings-panel" hidden>
           <div class="settings-heading"><div><span class="eyebrow">AI CONNECTION</span><h2>AI 연결 설정</h2></div><button class="icon-button" id="settings-close" type="button" aria-label="설정 닫기">×</button></div>
-          <p class="settings-copy">AI 제공자를 선택하고 API 키를 입력하세요. 키는 Chrome 확장 로컬 저장소에 저장되며 암호화되지는 않습니다. 분석 시 로컬 서버가 선택한 AI 제공자 인증에 사용합니다.</p>
-          <div class="settings-row api-provider-row">
-            <label class="field-label" for="api-provider">AI 제공자</label>
-            <select id="api-provider">
-              <option value="openai">OpenAI</option>
-              <option value="gemini">Gemini</option>
-              <option value="claude">Claude</option>
-            </select>
-          </div>
-          <label class="field-label" for="api-key-input">API 키</label>
-          <div class="api-key-entry">
-            <input id="api-key-input" type="password" autocomplete="off" spellcheck="false" placeholder="선택한 제공자의 API 키" />
-            <button class="api-key-toggle" id="api-key-toggle" type="button" aria-label="API 키 표시">표시</button>
-          </div>
-          <div class="settings-actions api-key-actions">
-            <span id="api-key-status" role="status">API 키는 이 브라우저에 저장됩니다.</span>
-            <button class="button button-dark" id="api-key-save" type="button">키 저장</button>
-          </div>
+          <p class="settings-copy">AI 서버는 Cloudflare에서 실행됩니다. API 키는 서버 Secret으로만 보관되며 확장 프로그램에는 저장되지 않습니다.</p>
           <div class="settings-row"><span class="field-label">사용 모델</span><strong id="server-model">확인 중...</strong></div>
           <div class="settings-actions"><span id="settings-status" role="status">로컬 서버 연결을 확인하는 중</span><button id="settings-refresh" class="button button-dark" type="button">연결 확인</button></div>
         </section>

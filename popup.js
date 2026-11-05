@@ -304,18 +304,10 @@ analyzeButton.addEventListener("click", async () => {
       throw new Error("분석할 공지 내용을 먼저 드래그해 선택해 주세요.");
     }
 
-    const saved = await chrome.storage.local.get("haezoomAISettings");
-    const settings = saved.haezoomAISettings || {};
-    const provider = settings.provider || "openai";
-    const apiKey = settings.keys?.[provider] || "";
-    if (!apiKey) {
-      throw new Error("확장 프로그램의 문서 분석 화면에서 AI 제공자와 API 키를 먼저 설정해 주세요.");
-    }
-
-    const response = await fetch("http://127.0.0.1:8000/api/analyze", {
+    const response = await fetch(`${globalThis.HAEZOOM_API_BASE_URL}/api/analyze`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text: page.text.slice(0, 45000), provider, apiKey }),
+      body: JSON.stringify({ text: page.text.slice(0, 45000) }),
     });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(payload.error?.message || `AI 분석 실패 (${response.status})`);

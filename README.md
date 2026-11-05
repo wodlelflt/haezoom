@@ -32,10 +32,14 @@ npm start
 
 ## Chrome 확장 프로그램
 
-1. 위 실행 절차대로 `.env`를 설정하고 `npm start`로 로컬 AI 서버를 계속 실행합니다.
-2. Chrome에서 `chrome://extensions`를 열고 개발자 모드를 켠 뒤 `압축해제된 확장 프로그램을 로드합니다`를 눌러 저장소 폴더를 선택합니다.
-3. 확장 아이콘에서 `PDF·이미지 문서 분석하기`를 선택해 문서 분석 탭을 열고, `API 설정`에서 AI 제공자와 키를 저장합니다. PDF와 PNG/JPG/WEBP를 분석할 수 있습니다.
-4. 학교 공지에서 분석할 내용을 드래그해 선택하고 확장 아이콘의 `선택한 내용 AI 분석`을 누릅니다. 선택한 텍스트만 AI에 보내 요약·할 일·일정을 분석합니다.
-5. 팝업에서 요약과 추출된 할 일을 확인하고 `분석 결과를 Google Calendar에 등록`을 눌러 날짜가 명확한 일정과 제출 마감을 등록합니다.
+Cloudflare Worker API를 배포하려면 Node.js가 설치된 개발 컴퓨터에서 다음을 실행합니다. API 키는 채팅이나 코드에 넣지 말고 `wrangler secret put` 명령의 터미널 프롬프트에 직접 입력하세요.
 
-확장 프로그램은 PDF.js와 OCR 엔진을 로컬 리소스로 포함하고, OCR 언어 데이터는 첫 사용 시 내려받습니다. API 키는 Chrome 확장 로컬 저장소에 저장되며 암호화되지 않습니다. 분석 시 로컬 서버가 선택한 AI 제공자 인증에 사용합니다. 문서 OCR은 브라우저에서 수행하며 추출한 텍스트와 표 구조만 로컬 서버로 보냅니다. 웹 공지 분석은 드래그해 선택한 텍스트만 전송합니다. 결과 중 날짜가 없거나 AI 검토가 필요한 항목은 캘린더 등록에서 제외되며, 시간 정보가 불확실한 일정은 종일 일정으로 등록합니다. 첫 등록 시 Google 계정 권한 승인이 필요합니다.
+```bash
+npx wrangler login
+npx wrangler secret put ANTHROPIC_API_KEY
+npx wrangler deploy
+```
+
+배포가 끝나면 Cloudflare가 출력한 Worker URL을 `api-config.js`의 `HAEZOOM_API_BASE_URL`에 넣습니다. `wrangler.toml`은 Claude Haiku 모델과 IP별 분당 10회 제한을 설정합니다. Chrome에서 `chrome://extensions`를 열고 개발자 모드를 켠 뒤 저장소 폴더를 압축해제된 확장 프로그램으로 로드합니다.
+
+사용자는 문서 분석 탭에서 PDF·이미지를 올리거나, 학교 공지에서 분석할 내용을 드래그해 선택한 뒤 확장 팝업의 `선택한 내용 AI 분석`을 누릅니다. 요약과 할 일·일정을 확인하고 `Google Calendar에 등록`을 선택합니다. API 키는 Cloudflare Secret에만 보관되고 확장에 포함되지 않습니다. PDF OCR은 브라우저에서 처리하며, 선택 텍스트 또는 OCR 텍스트와 표 구조는 Worker를 통해 Claude로 전달됩니다. Worker 무료 이용량과 Claude API 사용료는 별도이며, 공개 배포 전에는 계정 인증과 더 강한 사용량 제한을 추가해야 합니다. 날짜가 없거나 AI 검토가 필요한 항목은 Calendar 등록에서 제외되며, 첫 등록 시 Google 계정 권한 승인이 필요합니다.
