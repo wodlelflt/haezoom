@@ -120,6 +120,8 @@ export default {
 
 async function analyzeNotice(text, layoutText, env) {
   const userPrompt = `아래 학교 공지에서 핵심을 요약하고 할 일과 일정을 추출하세요. 날짜가 불명확하면 추측하지 말고 검토가 필요하다고 표시하세요.\n\n${layoutText ? `표·좌표 구조:\n${layoutText.slice(0, MAX_TEXT_LENGTH)}\n\n` : ""}공지 원문:\n${text.slice(0, MAX_TEXT_LENGTH)}`;
+  const currentDate = getTodayInSeoul();
+  const systemPrompt = `${SYSTEM_PROMPT}\n오늘의 한국 날짜는 ${currentDate}입니다. 연도 없이 월과 일이 명확한 날짜는 다음 기준으로 연도를 보정해 YYYY-MM-DD로 출력하세요: 날짜의 월이 오늘의 월보다 작으면 다음 연도, 같거나 크면 올해입니다. 연도 없는 날짜 범위는 시작 날짜에 같은 기준을 적용하고, 종료 월이 시작 월보다 작으면 종료 연도는 시작 연도보다 1년 뒤입니다. 월이나 일이 불완전하거나 문맥상 날짜가 불명확한 경우에만 needs_review를 true로 설정하세요. 이 규칙은 연도 없는 날짜를 원문 그대로 두라는 앞선 지침보다 우선합니다.`;
   const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
@@ -131,7 +133,7 @@ async function analyzeNotice(text, layoutText, env) {
     body: JSON.stringify({
       model: env.CLAUDE_MODEL || "claude-haiku-5-5",
       max_tokens: 4096,
-      system: SYSTEM_PROMPT,
+      system: systemPrompt,
       messages: [{ role: "user", content: userPrompt }],
       output_config: {
         format: {
@@ -158,7 +160,68 @@ async function analyzeNotice(text, layoutText, env) {
   if (typeof result.summary !== "string" || !Array.isArray(result.tasks) || !Array.isArray(result.schedules)) {
     throw new Error("AI 응답의 요약 또는 일정 형식이 올바르지 않습니다.");
   }
-  return result;
+  const today = getTodayInSeoul();
+  return {
+    ...result,
+    tasks: result.tasks.map((task) => ({
+      ...task,
+      deadline: normalizeAnalysisDate(task.deadline, today),
+    })),
+    schedules: result.schedules.map((schedule) => ({
+      ...schedule,
+      date: normalizeAnalysisDate(schedule.date, today),
+    })),
+  };
+}
+
+function getTodayInSeoul() {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Seoul",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date()).map((part) => [part.type, part.value]));
+  return `${parts.year}-${parts.month}-${parts.day}`;
+}
+
+function normalizeAnalysisDate(value, today) {
+  if (typeof value !== "string") return value;
+  const pattern = /(?:(?<koreanYear>20\d{2})\s*년\s*(?<koreanMonth>\d{1,2})\s*월\s*(?<koreanDay>\d{1,2})\s*일?|(?<isoYear>20\d{2})\s*[./-]\s*(?<isoMonth>\d{1,2})\s*[./-]\s*(?<isoDay>\d{1,2})\s*\.?|(?<month>\d{1,2})\s*(?:월|[./-])\s*(?<day>\d{1,2})\s*일?)/g;
+  const matches = [...value.matchAll(pattern)];
+  const isRange = /부터|까지|~|～|–|—|\bto\b/i.test(value);
+  if (!matches.length || (matches.length > 1 && !isRange)) return value;
+
+  const [currentYear, currentMonth] = today.split("-").map(Number);
+  const dates = matches.map((match) => {
+    const groups = match.groups;
+    const explicitYear = groups.koreanYear || groups.isoYear;
+    const year = explicitYear
+      ? Number(explicitYear)
+      : Number(groups.month) < currentMonth ? currentYear + 1 : currentYear;
+    const month = Number(groups.koreanMonth || groups.isoMonth || groups.month);
+    const day = Number(groups.koreanDay || groups.isoDay || groups.day);
+    const date = new Date(Date.UTC(year, month - 1, day));
+    if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return null;
+    return { year, month, day, explicitYear: Boolean(explicitYear) };
+  });
+  if (dates.some((date) => !date)) return value;
+
+  const start = dates[0];
+  let end = dates.at(-1);
+  if (isRange && dates.length > 1 && !end.explicitYear) {
+    const startValue = Date.UTC(start.year, start.month - 1, start.day);
+    let endValue = Date.UTC(end.year, end.month - 1, end.day);
+    if (endValue < startValue) {
+      end = { ...end, year: end.year + 1 };
+      endValue = Date.UTC(end.year, end.month - 1, end.day);
+    }
+    if (endValue < startValue) return value;
+  } else if (isRange && dates.length > 1) {
+    if (Date.UTC(end.year, end.month - 1, end.day) < Date.UTC(start.year, start.month - 1, start.day)) return value;
+  }
+
+  const formatDate = ({ year, month, day }) => `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+  return isRange && dates.length > 1 ? `${formatDate(start)} ~ ${formatDate(end)}` : formatDate(start);
 }
 
 function sendJson(body, status, headers) {
