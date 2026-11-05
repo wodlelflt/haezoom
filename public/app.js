@@ -163,6 +163,7 @@ async function extractText(file) {
   };
   if (IS_EXTENSION_PAGE) {
     Object.assign(workerOptions, {
+      workerBlobURL: false,
       workerPath: chrome.runtime.getURL("vendor/tesseract/worker.min.js"),
       corePath: chrome.runtime.getURL("vendor/tesseract/tesseract-core-simd-lstm.wasm.js"),
       langPath: "https://tessdata.projectnaptha.com/4.0.0",
@@ -436,8 +437,8 @@ function collectCalendarEntries(result) {
 
 function makeCalendarEvent(kind, item) {
   if (item.needs_review) return null;
-  const date = parseCalendarDate(kind === "schedule" ? item.date : item.deadline);
-  if (!date) return null;
+  const dateRange = parseCalendarDateRange(kind === "schedule" ? item.date : item.deadline);
+  if (!dateRange) return null;
 
   const source = selectedFile?.name ? `출처 문서: ${selectedFile.name}` : "";
   const details = kind === "schedule"
@@ -456,19 +457,37 @@ function makeCalendarEvent(kind, item) {
   };
 
   if (kind === "schedule" && item.location) event.location = item.location;
-  const time = kind === "schedule" ? parseCalendarTime(item.time) : null;
+  const time = kind === "schedule" && !dateRange.isRange ? parseCalendarTime(item.time) : null;
   if (time) {
-    const startDateTime = `${date}T${time}:00+09:00`;
+    const startDateTime = `${dateRange.start}T${time}:00+09:00`;
     event.start = { dateTime: startDateTime, timeZone: "Asia/Seoul" };
     event.end = {
       dateTime: new Date(Date.parse(startDateTime) + 60 * 60 * 1000).toISOString(),
       timeZone: "Asia/Seoul",
     };
   } else {
-    event.start = { date };
-    event.end = { date: addCalendarDays(date, 1) };
+    event.start = { date: dateRange.start };
+    event.end = { date: dateRange.end };
   }
   return event;
+}
+
+function parseCalendarDateRange(value) {
+  if (typeof value !== "string") return null;
+  const tokens = [...value.matchAll(/20\d{2}\s*(?:년\s*\d{1,2}\s*월\s*\d{1,2}\s*일?|[./-]\s*\d{1,2}\s*[./-]\s*\d{1,2})/g)]
+    .map(([token]) => token);
+  if (!tokens.length) return null;
+  const isRange = /부터|까지|~|～|–|—|\bto\b/i.test(value);
+  if (tokens.length > 1 && !isRange) return null;
+  const start = parseCalendarDate(tokens[0]);
+  const last = parseCalendarDate(tokens.at(-1));
+  if (!start || !last || start > last) return null;
+  const isDateRange = isRange && tokens.length > 1;
+  return {
+    start,
+    end: addCalendarDays(last, 1),
+    isRange: isDateRange,
+  };
 }
 
 function parseCalendarDate(value) {
@@ -485,6 +504,12 @@ function parseCalendarDate(value) {
     return null;
   }
   return `${yearText}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+function addCalendarDays(date, days) {
+  const [year, month, day] = date.split("-").map(Number);
+  const next = new Date(Date.UTC(year, month - 1, day + days));
+  return `${next.getUTCFullYear()}-${String(next.getUTCMonth() + 1).padStart(2, "0")}-${String(next.getUTCDate()).padStart(2, "0")}`;
 }
 
 function parseCalendarTime(value) {
@@ -611,10 +636,23 @@ function setProgress(percent, step, message, detail) {
 }
 
 function getReadableError(error) {
-  const message = error instanceof Error ? error.message : "알 수 없는 오류가 발생했습니다.";
-  if (message.includes("401")) return "API 키가 올바르지 않습니다. .env 파일의 키를 확인해 주세요.";
-  if (message.includes("429")) return "API 사용 한도를 초과했습니다. 잠시 후 다시 시도해 주세요.";
-  if (message.includes("Failed to fetch")) return "로컬 서버에 연결할 수 없습니다. npm start로 서버를 실행해 주세요.";
+  const message = error instanceof Error
+    ? error.message
+    : typeof error === "string"
+      ? error
+      : error && typeof error === "object"
+        ? error.message || error.error || error.reason || JSON.stringify(error)
+        : String(error);
+  if (message.includes("401")) return IS_EXTENSION_PAGE
+    ? "Cloudflare 서버의 AI 인증이 거부됐습니다. Secret 설정을 확인해 주세요."
+    : "API 키가 올바르지 않습니다. .env 파일의 키를 확인해 주세요.";
+  if (message.includes("429")) return "API 요청 한도를 초과했습니다. 잠시 후 다시 시도해 주세요.";
+  if (message.includes("Failed to fetch")) return IS_EXTENSION_PAGE
+    ? "Cloudflare 분석 서버에 연결할 수 없습니다. api-config.js의 주소를 확인해 주세요."
+    : "로컬 서버에 연결할 수 없습니다. npm start로 서버를 실행해 주세요.";
+  if (message.includes("Network error while fetching")) {
+    return `OCR 언어 데이터를 불러오지 못했습니다: ${message}`;
+  }
   return message;
 }
 
