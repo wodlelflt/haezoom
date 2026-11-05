@@ -161,14 +161,16 @@ async function extractText(file) {
       }
     },
   };
-  if (IS_EXTENSION_PAGE) {
-    Object.assign(workerOptions, {
-      workerBlobURL: false,
-      workerPath: chrome.runtime.getURL("vendor/tesseract/worker.min.js"),
-      corePath: chrome.runtime.getURL("vendor/tesseract/tesseract-core-simd-lstm.wasm.js"),
-      langPath: "https://tessdata.projectnaptha.com/4.0.0",
-    });
-  }
+  Object.assign(workerOptions, {
+    workerBlobURL: false,
+    workerPath: IS_EXTENSION_PAGE
+      ? chrome.runtime.getURL("vendor/tesseract/worker.min.js")
+      : new URL("vendor/tesseract/worker.min.js", import.meta.url).href,
+    corePath: IS_EXTENSION_PAGE
+      ? chrome.runtime.getURL("vendor/tesseract/tesseract-core-simd-lstm.wasm.js")
+      : new URL("vendor/tesseract/tesseract-core-simd-lstm.wasm.js", import.meta.url).href,
+    langPath: "https://tessdata.projectnaptha.com/4.0.0",
+  });
   const worker = await window.Tesseract.createWorker("kor+eng", 1, workerOptions);
   try {
     if (file.type === "application/pdf") return await extractPdfText(file, worker);
@@ -527,12 +529,6 @@ function parseCalendarTime(value) {
     return null;
   }
   return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
-}
-
-function addCalendarDays(date, days) {
-  const [year, month, day] = date.split("-").map(Number);
-  const nextDate = new Date(Date.UTC(year, month - 1, day + days));
-  return `${nextDate.getUTCFullYear()}-${String(nextDate.getUTCMonth() + 1).padStart(2, "0")}-${String(nextDate.getUTCDate()).padStart(2, "0")}`;
 }
 
 function getCalendarAccessToken() {
